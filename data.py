@@ -1,79 +1,75 @@
-import joblib, json
+import joblib
+import json
 import numpy as np
 import pandas as pd
 from functools import partial
 from tqdm import tqdm
-# Prevent tqdm from printing multiline progress bars
-tqdm = partial(tqdm, position=0, leave=True)
-
 from sklearn.preprocessing import OneHotEncoder
+from pymatgen.core import Structure
+from mp_api.client import MPRester  # New API Client
 
-from pymatgen import Structure
-from matminer.data_retrieval.retrieve_MP import MPDataRetrieval
+tqdm = partial(tqdm, position=0, leave=True)
 
 def data_query(mp_api_key, max_elms=3, min_elms=3, max_sites=20, include_te=False):
     """
-    The function queries data from Materials Project.
+    Queries data from the Materials Project using the new API v3.
 
     Parameters
     ----------
     mp_api_key : str
-        The API key for Mateirals Project.
+        The API key for Materials Project.
     max_elms : int, optional
-        Maximum number of components/elements for crystals to be queried.
-        The default is 3.
+        Maximum number of components/elements for crystals to be queried. Default is 3.
     min_elms : int, optional
-        Minimum number of components/elements for crystals to be queried.
-        The default is 3.
+        Minimum number of components/elements for crystals to be queried. Default is 3.
     max_sites : int, optional
-        Maximum number of components/elements for crystals to be queried.
-        The default is 20.
+        Maximum number of sites for crystals to be queried. Default is 20.
     include_te : bool, optional
-        DESCRIPTION. The default is False.
+        Whether to include thermoelectric properties. Default is False.
 
     Returns
     -------
-    dataframe : pandas dataframe
-        Dataframe returned by MPDataRetrieval.
-
+    dataframe : pandas.DataFrame
+        DataFrame with the queried materials and their properties.
     """
-    mpdr = MPDataRetrieval(mp_api_key)
-    # Specify query criteria in MongoDB style
-    query_criteria = {
-        'e_above_hull':{'$lte': 0.08}, # eV/atom
-        'nelements': {'$gte': min_elms, '$lte': max_elms},
-        'nsites':{'$lte': max_sites},
-        }
-    # Specify properties to be queried, properties avaible are at https://github.com/materialsproject/mapidoc/tree/master/materials
-    query_properties = [
-        'material_id',
-        'formation_energy_per_atom',
-        'band_gap',
-        'pretty_formula',
-        'e_above_hull',
-        'elements',
-        'cif',
-        'spacegroup.number'
-        ]
-    # Obtain queried dataframe containing CIFs and groud-state property labels
-    dataframe = mpdr.get_dataframe(
-        criteria = query_criteria,
-        properties = query_properties,
+    with MPRester(mp_api_key) as mpr:
+        results = mpr.materials.summary.search(
+            num_elements=(min_elms, max_elms),  # Exactly 3 elements
+            energy_above_hull=(0, 0.08),  # Stability filter
+            fields=[
+                "material_id", "formation_energy_per_atom", "band_gap",
+                "formula_pretty", "energy_above_hull", "composition_reduced",
+                "symmetry", "structure", "nsites"
+            ]
         )
-    dataframe['ind'] = np.arange(len(dataframe))
+    
+    # Convert results to DataFrame
+    data = []
+    for result in results:
+        entry = {
+            "material_id": result.material_id,
+            "formation_energy_per_atom": result.formation_energy_per_atom,
+            "band_gap": result.band_gap,
+            "pretty_formula": result.formula_pretty,
+            "e_above_hull": result.energy_above_hull,
+            "elements": result.composition_reduced,
+            "spacegroup.number": result.symmetry.number if result.symmetry else None,
+            "cif": result.structure.to(fmt="cif") if result.structure else None,
+            "nsites": result.nsites
+        }
+        data.append(entry)
+    
+    dataframe = pd.DataFrame(data)
+    dataframe = dataframe[dataframe["nsites"] <= max_sites].reset_index(drop=True)  # Apply max_sites filter manually
     
     if include_te:
-        dataframe['ind'] = np.arange(0, len(dataframe))
-        # Read thermoelectric properties from https://datadryad.org/stash/dataset/doi:10.5061/dryad.gn001
-        te = pd.read_csv('data/thermoelectric_prop.csv', index_col=0)
-        te = te.dropna()
-        # Get compound index that has both ground-state and thermoelectric properties
+        te = pd.read_csv('data/thermoelectric_prop.csv', index_col=0).dropna()
         ind = dataframe.index.intersection(te.index)
-        # Concatenate thermoelectric properties to corresponding compounds
-        dataframe = pd.concat([dataframe, te.loc[ind,:]], axis=1)
+        dataframe = pd.concat([dataframe, te.loc[ind, :]], axis=1)
         dataframe['Seebeck'] = dataframe['Seebeck'].apply(np.abs)
     
     return dataframe
+
 
 def FTCP_represent(dataframe, max_elms=3, max_sites=20, return_Nsites=False):
     '''
