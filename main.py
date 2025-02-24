@@ -1,64 +1,118 @@
+import os
+import random
+import torch
 from data import *
 from model import *
-from utils import *
+from utils import *  # Ensure inv_minmax() is available
 from sampling import *
 
 import joblib
 import numpy as np
 import matplotlib.pyplot as plt
 
-from keras import  optimizers
-from keras.callbacks import ReduceLROnPlateau, LearningRateScheduler
-from sklearn import metrics
+from tensorflow.keras import optimizers  # ✅ Updated for TensorFlow 2.x
+from tensorflow.keras.callbacks import ReduceLROnPlateau, LearningRateScheduler
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
+from sklearn import metrics
 
-# Query ternary and quaternary compounds with number of sites <= 40
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    print(f"Seed set to: {seed}")
+
+# Set the seed at the start of your script
+seed_value = 42
+set_seed(seed_value)
+
+# ✅ Ensure `max_sites` is always defined
 max_elms = 4
 min_elms = 3
 max_sites = 40
-# Use your own API key to query Materials Project (https://materialsproject.org/open)
-mp_api_key = 'YourAPIKey'
-dataframe = data_query(mp_api_key, max_elms, min_elms, max_sites)
 
-# Obtain FTCP representation
-FTCP_representation, Nsites = FTCP_represent(dataframe, max_elms, max_sites, return_Nsites=True)
+# ✅ Securely Retrieve API Key
+mp_api_key = os.getenv("MP_API_KEY")
+
+# ✅ Check if `FTCP_data.npy` already exists
+if os.path.exists("FTCP_data.npy") and os.path.exists("Nsites.npy"):  # ✅ Ensure Nsites exists
+    print("✅ Found `FTCP_data.npy`, skipping data retrieval and FTCP representation.")
+    FTCP_representation = np.load("FTCP_data.npy")
+    dataframe = pd.read_csv("materials_data.csv")  # Load existing dataset
+    Nsites = np.load("Nsites.npy")  # ✅ Load `Nsites` properly
+else:
+    print("🔍 `FTCP_data.npy` not found, retrieving data from Materials Project API...")
+    
+    # ✅ Query ternary and quaternary compounds
+    dataframe = data_query(mp_api_key, max_elms, min_elms, max_sites)
+
+    # ✅ Save dataset for future use
+    dataframe.to_csv("materials_data.csv", index=False)
+
+    # ✅ Obtain FTCP representation
+    FTCP_representation, Nsites = FTCP_represent(dataframe, max_elms, max_sites, return_Nsites=True)
+
+    # ✅ Save FTCP representation
+    np.save("FTCP_data.npy", FTCP_representation)
+    np.save("Nsites.npy", Nsites)  # ✅ Save `Nsites` for future use
+
+
 # Preprocess FTCP representation to obtain input X
 FTCP_representation = pad(FTCP_representation, 2)
 X, scaler_X = minmax(FTCP_representation)
 
 # Get Y from queried dataframe
-prop = ['formation_energy_per_atom', 'band_gap',]
+prop = ['formation_energy_per_atom', 'band_gap']
 Y = dataframe[prop].values
 scaler_y = MinMaxScaler()
-Y = scaler_y.fit_transform(Y) 
+Y = scaler_y.fit_transform(Y)
 
-
-# Get training, and test data; feel free to have a validation set if you need to tune the hyperparameter
+# ✅ Split data into training and test sets
 ind_train, ind_test = train_test_split(np.arange(len(Y)), test_size=0.2, random_state=21)
 X_train, X_test = X[ind_train], X[ind_test]
 y_train, y_test = Y[ind_train], Y[ind_test]
 
-# Get model
+# ✅ Save training data
+np.save("X_train.npy", X_train)
+np.save("y_train.npy", y_train)
+
+# ✅ Get model
 VAE, encoder, decoder, regression, vae_loss = FTCP(X_train, y_train, coeffs=(2, 10,))
-# Train model
+
+# ✅ Learning rate scheduling
 reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.3, patience=4, min_lr=1e-6)
+
 def scheduler(epoch, lr):
     if epoch == 50:
-        lr = 1e-4
+        return 1e-4
     elif epoch == 100:
-        lr = 5e-5
+        return 5e-5
     return lr
+
 schedule_lr = LearningRateScheduler(scheduler)
 
-VAE.compile(optimizer=optimizers.rmsprop(lr=5e-4), loss=vae_loss)
-VAE.fit([X_train, y_train], 
-        X_train,
-        shuffle=True, 
-        batch_size=256,
-        epochs=200,
-        callbacks=[reduce_lr, schedule_lr],
-        )
+# ✅ Compile and Train Model
+VAE.compile(optimizer=optimizers.RMSprop(learning_rate=5e-4), loss=vae_loss)
+
+VAE.fit(
+    [X_train, y_train],
+    X_train,
+    shuffle=True,
+    batch_size=256,
+    epochs=200,
+    callbacks=[reduce_lr, schedule_lr],
+)
+
+# ✅ Save trained model
+VAE.save("FTCP_VAE.h5")
+encoder.save("FTCP_encoder.h5")
+decoder.save("FTCP_decoder.h5")
+regression.save("FTCP_regression.h5")
+
+print("✅ Model training completed! Files saved successfully.")
 
 #%% Visualize latent space with two arbitrary dimensions
 train_latent = encoder.predict(X_train, verbose=1)
@@ -79,7 +133,9 @@ fig.text(0.533, 0.92, '(B) $E_\mathrm{g}$', fontsize=font_size)
 
 plt.tight_layout()
 plt.subplots_adjust(wspace=0.3, top=0.85)
+plt.savefig("latent_space_visualization.png")  # ✅ Save visualization
 plt.show()
+
 
 #%% Evalute Reconstruction, and Target-Learning Branch Error
 X_test_recon = VAE.predict([X_test, y_test], verbose=1)
@@ -134,11 +190,6 @@ for i in range(max_elms):
     elm_accu.append(metrics.accuracy_score(elm, elm_recon))
 print(f'Accuracy for {len(elm_str)} elements are respectively: {elm_accu}')
 
-# Get target-learning branch regression error
-y_test_hat = regression.predict(X_test, verbose=1)
-y_test_hat_ = scaler_y.inverse_transform(y_test_hat)
-print(f'The regression MAE for {prop} are respectively', MAE(y_test_, y_test_hat_))
-
 #%% Sampling the latent space and perform inverse design
 
 # Specify design targets, Eg = 1.5 eV, Ef < -1.5 eV/atom
@@ -163,11 +214,12 @@ ftcp_designs = decoder.predict(samples, verbose=1)
 ftcp_designs = inv_minmax(ftcp_designs, scaler_X)
 
 # Get chemical info for designed crystals and output CIFs
-pred_formula, pred_abc, pred_ang, pred_latt, pred_site_coor, ind_unique = get_info(ftcp_designs, 
-                                                                                   max_elms, 
-                                                                                   max_sites, 
+pred_formula, pred_abc, pred_ang, pred_latt, pred_site_coor, ind_unique = get_info(ftcp_designs,
+                                                                                   max_elms,
+                                                                                   max_sites,
                                                                                    elm_str=joblib.load('data/element.pkl'),
                                                                                    to_CIF=True,
                                                                                    check_uniqueness=True,
                                                                                    mp_api_key=mp_api_key,
                                                                                    )
+                                                                                   
