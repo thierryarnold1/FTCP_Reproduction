@@ -1,35 +1,43 @@
+import os
 from data import *
 from model import *
-from utils import *
+from utils import *  # Ensure inv_minmax() is available
 from sampling import *
 
 import joblib
 import numpy as np
 import matplotlib.pyplot as plt
 
-from keras import  optimizers
-from keras.callbacks import ReduceLROnPlateau, LearningRateScheduler
-from sklearn import metrics
+from tensorflow.keras import optimizers  # ✅ Updated for TensorFlow 2.x
+from tensorflow.keras.callbacks import ReduceLROnPlateau, LearningRateScheduler
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
+from sklearn import metrics
 
-# Query ternary and quaternary compounds with number of sites <= 40
+# ✅ Securely Retrieve API Key
+mp_api_key = os.getenv("MP_API_KEY")
+
+# ✅ Query ternary and quaternary compounds with number of sites <= 40
 max_elms = 4
 min_elms = 3
 max_sites = 40
-# Use your own API key to query Materials Project (https://materialsproject.org/open)
-mp_api_key = 'YourAPIKey'
 dataframe = data_query(mp_api_key, max_elms, min_elms, max_sites, include_te=True)
 
-# Obtain FTCP representation
+# ✅ Save dataset for future use
+dataframe.to_csv("materials_data_semi.csv", index=False)
+
+# ✅ Obtain FTCP representation
 FTCP_representation, Nsites = FTCP_represent(dataframe, max_elms, max_sites, return_Nsites=True)
+
+# ✅ Save FTCP representation
+np.save("FTCP_data_semi.npy", FTCP_representation)
+
 # Preprocess FTCP representation to obtain input X
 FTCP_representation = pad(FTCP_representation, 2)
 X, scaler_X = minmax(FTCP_representation)
 
 # Get Y from queried dataframe
 prop = ['formation_energy_per_atom', 'band_gap', 'Powerfactor', 'ind']
-
 prop_dim = 2
 semi_prop_dim = 1
 
@@ -39,37 +47,53 @@ scaler_y_semi = MinMaxScaler()
 Y[:, :prop_dim] = scaler_y.fit_transform(Y[:, :prop_dim])
 Y[:, prop_dim:prop_dim+semi_prop_dim] = scaler_y_semi.fit_transform(Y[:, prop_dim:prop_dim+semi_prop_dim])
 
-# Get training, and test data; feel free to have a validation set if you need to tune the hyperparameter
+# ✅ Split data into training and test sets
 ind_train, ind_test = train_test_split(np.arange(len(Y)), test_size=0.2, random_state=21)
 X_train, X_test = X[ind_train], X[ind_test]
 y_train, y_test = Y[ind_train], Y[ind_test]
 
-# Get model
-VAE, encoder, decoder, regression, vae_loss = FTCP(X_train, 
-                                                   y_train, 
-                                                   coeffs=(3, 20, 5,), 
-                                                   semi=True,
-                                                   label_ind=dataframe.dropna()['ind'].values,
-                                                   prop_dim=(prop_dim, semi_prop_dim),
-                                                   )
-# Train model
+# ✅ Save training data
+np.save("X_train_semi.npy", X_train)
+np.save("y_train_semi.npy", y_train)
+
+# ✅ Get Semi-Supervised Model
+VAE, encoder, decoder, regression, vae_loss = FTCP(
+    X_train, y_train, coeffs=(3, 20, 5,), semi=True,
+    label_ind=dataframe.dropna()['ind'].values,
+    prop_dim=(prop_dim, semi_prop_dim),
+)
+
+# ✅ Learning rate scheduling
 reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.3, patience=4, min_lr=1e-6)
+
 def scheduler(epoch, lr):
     if epoch == 50:
-        lr = 2e-4
+        return 2e-4
     elif epoch == 100:
-        lr = 5e-5
+        return 5e-5
     return lr
+
 schedule_lr = LearningRateScheduler(scheduler)
 
-VAE.compile(optimizer=optimizers.rmsprop(lr=8e-4), loss=vae_loss)
-VAE.fit([X_train, y_train], 
-        X_train,
-        shuffle=True, 
-        batch_size=256,
-        epochs=200,
-        callbacks=[reduce_lr, schedule_lr],
-        )
+# ✅ Compile and Train Model
+VAE.compile(optimizer=optimizers.RMSprop(learning_rate=8e-4), loss=vae_loss)
+
+VAE.fit(
+    [X_train, y_train], 
+    X_train,
+    shuffle=True, 
+    batch_size=256,
+    epochs=30,  # ✅ Reduced for testing; increase later, initially 200
+    callbacks=[reduce_lr, schedule_lr],
+)
+
+# ✅ Save trained model
+VAE.save("FTCP_VAE_semi.h5")
+encoder.save("FTCP_encoder_semi.h5")
+decoder.save("FTCP_decoder_semi.h5")
+regression.save("FTCP_regression_semi.h5")
+
+print("✅ Semi-supervised model training completed!")
 
 #%% Visualize latent space with two arbitrary dimensions
 train_latent = encoder.predict(X_train, verbose=1)
@@ -100,6 +124,7 @@ fig.text(0.678, 0.92, '(C) Power Factor', fontsize=font_size)
 
 plt.tight_layout()
 plt.subplots_adjust(wspace=0.3, top=0.85)
+plt.savefig("latent_space_semi.png") 
 plt.show()
 
 #%% Evalute Reconstruction, and Target-Learning Branch Error
