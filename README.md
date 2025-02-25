@@ -10,29 +10,6 @@ The package provides functions in three major aspects:
 The following paper describes the details of the FTCP representation and framework: 
 _**An invertible crystallographic representation for general inverse design of inorganic crystals with targeted properties**_ at [Matter](https://www.cell.com/matter/pdf/S2590-2385(21)00625-1.pdf) and [arXv](https://arxiv.org/pdf/2005.07609.pdf)
 
-# Table of Contents
-- [Fourier-Transformed Crystal Properties (FTCP)](#fourier-transformed-crystal-properties-ftcp)
-- [How to Cite](#how-to-cite)
-- [Installation](#installation)
-  - [Installation in Google Colab](#installation-in-google-colab) 
-- [Usage](#usage)
-- [Reproduce Publication Figures](#reproduce-publication-figures)
-- [Authors](#authors)
-
-# How to Cite
-
-Please cite the following work if you want to use FTCP.
-```
-@article{REN2021,
-  title = {An invertible crystallographic representation for general inverse design of inorganic crystals with targeted properties},
-  author = {Ren, Zekun and Tian, Siyu Isaac Parker and Noh, Juhwan and Oviedo, Felipe and Xing, Guangzong and Li, Jiali and Liang, Qiaohao and Zhu, Ruiming and Aberle, Armin G. and Sun, Shijing and Wang, Xiaonan and Liu, Yi and Li, Qianxiao and Jayavelu, Senthilnath and Hippalgaonkar, Kedar and Jung, Yousung and Buonassisi, Tonio},
-  journal = {Matter},
-  year = {2021},
-  issn = {2590-2385},
-  doi = {https://doi.org/10.1016/j.matt.2021.11.032},
-  url = {https://www.cell.com/matter/fulltext/S2590-2385(21)00625-1},
-}
-```
 
 # Installation
 
@@ -64,10 +41,6 @@ The package contains the following module and scripts:
 | `sampling.py`  | Sampling-related functions, including getting the chemical formulas, checking for compositional uniqueness, and outputting CIFs of designed crystals|
 | `utils.py` | Script for auxiliary functions|
 | `requirements.txt`| required packages|
-
-# Reproduce Publication Figures
-
-Run `.py` files for respective figures in [publication figures](https://github.com/PV-Lab/FTCP/tree/master/publication%20figures).
 
 # Authors
 
