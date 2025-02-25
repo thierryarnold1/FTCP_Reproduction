@@ -1,72 +1,52 @@
 import os
-import random
-import torch
-from data import *
-from model import *
-from utils import *  # Ensure inv_minmax() is available
-from sampling import *
+import pandas as pd
+from data import data_query_batteries, FTCP_represent
+from model import FTCP
+from utils import pad, minmax, inv_minmax
+from sampling import get_info
 
 import joblib
 import numpy as np
 import matplotlib.pyplot as plt
 
-from tensorflow.keras import optimizers  # ✅ Updated for TensorFlow 2.x
+from tensorflow.keras import optimizers
 from tensorflow.keras.callbacks import ReduceLROnPlateau, LearningRateScheduler
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn import metrics
 
-
-def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    print(f"Seed set to: {seed}")
-
-# Set the seed at the start of your script
-seed_value = 42
-set_seed(seed_value)
-
-# ✅ Ensure `max_sites` is always defined
-max_elms = 4
-min_elms = 3
-max_sites = 40
-
 # ✅ Securely Retrieve API Key
 mp_api_key = os.getenv("MP_API_KEY")
 
-# ✅ Check if `FTCP_data.npy` already exists
-if os.path.exists("FTCP_data.npy") and os.path.exists("Nsites.npy"):  # ✅ Ensure Nsites exists
-    print("✅ Found `FTCP_data.npy`, skipping data retrieval and FTCP representation.")
-    FTCP_representation = np.load("FTCP_data.npy")
-    dataframe = pd.read_csv("materials_data.csv")  # Load existing dataset
-    Nsites = np.load("Nsites.npy")  # ✅ Load `Nsites` properly
+# ✅ Check if `FTCP_data_batteries.npy` already exists
+if os.path.exists("FTCP_data_batteries.npy") and os.path.exists("Nsites_batteries.npy"):
+    print("✅ Found `FTCP_data_batteries.npy`, skipping data retrieval and FTCP representation.")
+    FTCP_representation = np.load("FTCP_data_batteries.npy")
+    dataframe = pd.read_csv("batteries_data.csv")
+    Nsites = np.load("Nsites_batteries.npy")
 else:
-    print("🔍 `FTCP_data.npy` not found, retrieving data from Materials Project API...")
+    print("🔍 `FTCP_data_batteries.npy` not found, retrieving battery data from Materials Project API...")
     
-    # ✅ Query ternary and quaternary compounds
-    dataframe = data_query(mp_api_key, max_elms, min_elms, max_sites)
+    # ✅ Query battery materials
+    dataframe = data_query(mp_api_key)
 
     # ✅ Save dataset for future use
-    dataframe.to_csv("materials_data.csv", index=False)
+    dataframe.to_csv("batteries_data.csv", index=False)
 
     # ✅ Obtain FTCP representation
-    FTCP_representation, Nsites = FTCP_represent(dataframe, max_elms, max_sites, return_Nsites=True)
+    FTCP_representation, Nsites, valid_indices = FTCP_represent(dataframe, return_Nsites=True)
 
     # ✅ Save FTCP representation
-    np.save("FTCP_data.npy", FTCP_representation)
-    np.save("Nsites.npy", Nsites)  # ✅ Save `Nsites` for future use
-
+    np.save("FTCP_data_batteries.npy", FTCP_representation)
+    np.save("Nsites_batteries.npy", Nsites)
 
 # Preprocess FTCP representation to obtain input X
 FTCP_representation = pad(FTCP_representation, 2)
 X, scaler_X = minmax(FTCP_representation)
 
-# Get Y from queried dataframe
-prop = ['formation_energy_per_atom', 'band_gap']
-Y = dataframe[prop].values
+# Get Y from filtered dataframe
+prop = ['average_voltage', 'capacity_grav', 'capacity_vol', 'energy_grav', 'energy_vol']
+Y = dataframe[prop].values  # ✅ Now X and Y match perfectly
 scaler_y = MinMaxScaler()
 Y = scaler_y.fit_transform(Y)
 
@@ -76,8 +56,8 @@ X_train, X_test = X[ind_train], X[ind_test]
 y_train, y_test = Y[ind_train], Y[ind_test]
 
 # ✅ Save training data
-np.save("X_train.npy", X_train)
-np.save("y_train.npy", y_train)
+np.save("X_train_batteries.npy", X_train)
+np.save("y_train_batteries.npy", y_train)
 
 # ✅ Get model
 VAE, encoder, decoder, regression, vae_loss = FTCP(X_train, y_train, coeffs=(2, 10,))
@@ -107,12 +87,12 @@ VAE.fit(
 )
 
 # ✅ Save trained model
-VAE.save("FTCP_VAE.h5")
-encoder.save("FTCP_encoder.h5")
-decoder.save("FTCP_decoder.h5")
-regression.save("FTCP_regression.h5")
+VAE.save("FTCP_VAE_batteries.h5")
+encoder.save("FTCP_encoder_batteries.h5")
+decoder.save("FTCP_decoder_batteries.h5")
+regression.save("FTCP_regression_batteries.h5")
 
-print("✅ Model training completed! Files saved successfully.")
+print("✅ Model training for batteries completed! Files saved successfully.")
 
 #%% Visualize latent space with two arbitrary dimensions
 train_latent = encoder.predict(X_train, verbose=1)
@@ -128,14 +108,13 @@ s0 = ax[0].scatter(train_latent[:,0], train_latent[:,1], s=7, c=np.squeeze(y_tra
 cbar = plt.colorbar(s0, ax=ax[0], ticks=list(range(-1, -8, -2)))
 s1 = ax[1].scatter(train_latent[:,0], train_latent[:,1], s=7, c=np.squeeze(y_train_[:,1]))
 plt.colorbar(s1, ax=ax[1], ticks=list(range(0, 10, 2)))
-fig.text(0.016, 0.92, '(A) $E_\mathrm{f}$', fontsize=font_size)
-fig.text(0.533, 0.92, '(B) $E_\mathrm{g}$', fontsize=font_size)
+fig.text(0.016, 0.92, '(A) Voltage', fontsize=font_size)
+fig.text(0.533, 0.92, '(B) Energy', fontsize=font_size)
 
 plt.tight_layout()
 plt.subplots_adjust(wspace=0.3, top=0.85)
-plt.savefig("latent_space_visualization.png")  # ✅ Save visualization
+plt.savefig(save_path + "latent_space_visualization.png")
 plt.show()
-
 
 #%% Evalute Reconstruction, and Target-Learning Branch Error
 X_test_recon = VAE.predict([X_test, y_test], verbose=1)
@@ -192,17 +171,17 @@ print(f'Accuracy for {len(elm_str)} elements are respectively: {elm_accu}')
 
 #%% Sampling the latent space and perform inverse design
 
-# Specify design targets, Eg = 1.5 eV, Ef < -1.5 eV/atom
-target_Ef, target_Eg = -1.5, 1.5
-# Set number of compounds to purturb locally about
+# Specify design targets, e.g., high voltage and energy density
+target_voltage, target_energy = 3.7, 600  # Example values for lithium-ion batteries
 Nsamples = 10
-# Obtain points that are closest to the design target in the training set
-ind_constraint = np.squeeze(np.argwhere(y_train_[:, 0] < target_Ef))
-ind_temp = np.argsort(np.abs(y_train_[ind_constraint, 1] - target_Eg))
+
+# Obtain points closest to the design target in the training set
+ind_constraint = np.squeeze(np.argwhere(y_train_[:, 0] > target_voltage))
+ind_temp = np.argsort(np.abs(y_train_[ind_constraint, 1] - target_energy))
 ind_sample = ind_constraint[ind_temp][:Nsamples]
-# Set number of purturbing instances around each compound
+
+# Set number of perturbing instances around each compound
 Nperturb = 3
-# Set local purturbation (Lp) scale
 Lp_scale = 0.6
 
 # Sample (Lp)
@@ -213,13 +192,11 @@ samples = samples + gaussian_noise * Lp_scale
 ftcp_designs = decoder.predict(samples, verbose=1)
 ftcp_designs = inv_minmax(ftcp_designs, scaler_X)
 
-# Get chemical info for designed crystals and output CIFs
+# Get chemical info for designed battery materials and output CIFs
 pred_formula, pred_abc, pred_ang, pred_latt, pred_site_coor, ind_unique = get_info(ftcp_designs,
                                                                                    max_elms,
                                                                                    max_sites,
                                                                                    elm_str=joblib.load('data/element.pkl'),
                                                                                    to_CIF=True,
                                                                                    check_uniqueness=True,
-                                                                                   mp_api_key=mp_api_key,
-                                                                                   )
-                                                                                   
+                                                                                   mp_api_key=mp_api_key)
