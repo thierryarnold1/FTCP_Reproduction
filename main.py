@@ -1,9 +1,9 @@
 import os
 import pandas as pd
-from data import data_query_batteries, FTCP_represent
-from model import FTCP
-from utils import pad, minmax, inv_minmax
-from sampling import get_info
+from data import *
+from model import *
+from utils import *
+from sampling import *
 
 import joblib
 import numpy as np
@@ -17,6 +17,7 @@ from sklearn import metrics
 
 # ✅ Securely Retrieve API Key
 mp_api_key = os.getenv("MP_API_KEY")
+
 
 # ✅ Check if `FTCP_data_batteries.npy` already exists
 if os.path.exists("FTCP_data_batteries.npy") and os.path.exists("Nsites_batteries.npy"):
@@ -34,7 +35,7 @@ else:
     dataframe.to_csv("batteries_data.csv", index=False)
 
     # ✅ Obtain FTCP representation
-    FTCP_representation, Nsites, valid_indices = FTCP_represent(dataframe, return_Nsites=True)
+    FTCP_representation, Nsites = FTCP_represent(dataframe, return_Nsites=True)
 
     # ✅ Save FTCP representation
     np.save("FTCP_data_batteries.npy", FTCP_representation)
@@ -94,6 +95,9 @@ regression.save("FTCP_regression_batteries.h5")
 
 print("✅ Model training for batteries completed! Files saved successfully.")
 
+max_sites = 160
+max_elms = 6
+
 #%% Visualize latent space with two arbitrary dimensions
 train_latent = encoder.predict(X_train, verbose=1)
 y_train_, y_test_ = scaler_y.inverse_transform(y_train), scaler_y.inverse_transform(y_test)
@@ -113,7 +117,7 @@ fig.text(0.533, 0.92, '(B) Energy', fontsize=font_size)
 
 plt.tight_layout()
 plt.subplots_adjust(wspace=0.3, top=0.85)
-plt.savefig(save_path + "latent_space_visualization.png")
+plt.savefig("latent_space_visualization.png")
 plt.show()
 
 #%% Evalute Reconstruction, and Target-Learning Branch Error
