@@ -1,6 +1,4 @@
 import os
-import random
-import torch
 from data import *
 from model import *
 from utils import *  # Ensure inv_minmax() is available
@@ -15,19 +13,6 @@ from tensorflow.keras.callbacks import ReduceLROnPlateau, LearningRateScheduler
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from sklearn import metrics
-
-
-def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    print(f"Seed set to: {seed}")
-
-# Set the seed at the start of your script
-seed_value = 42
-set_seed(seed_value)
 
 # ✅ Ensure `max_sites` is always defined
 max_elms = 4
