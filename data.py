@@ -1,3 +1,4 @@
+
 import joblib
 import json
 import numpy as np
@@ -10,82 +11,72 @@ from mp_api.client import MPRester  # New API Client
 
 tqdm = partial(tqdm, position=0, leave=True)
 
-def data_query(mp_api_key, max_elms=3, min_elms=3, max_sites=20, include_te=False):
+def data_query(mp_api_key):
     """
-    Queries data from the Materials Project using the new API v3.
+    Queries batteries data from the Materials Project using the new API v3.
 
     Parameters
     ----------
     mp_api_key : str
         The API key for Materials Project.
-    max_elms : int, optional
-        Maximum number of components/elements for crystals to be queried. Default is 3.
-    min_elms : int, optional
-        Minimum number of components/elements for crystals to be queried. Default is 3.
-    max_sites : int, optional
-        Maximum number of sites for crystals to be queried. Default is 20.
-    include_te : bool, optional
-        Whether to include thermoelectric properties. Default is False.
-
+        
     Returns
     -------
     dataframe : pandas.DataFrame
-        DataFrame with the queried materials and their properties.
+        DataFrame with the queried Batteries materials and their properties.
     """
     with MPRester(mp_api_key) as mpr:
-        results = mpr.materials.summary.search(
-            num_elements=(min_elms, max_elms),  # Exactly 3 elements
-            energy_above_hull=(0, 0.08),  # Stability filter
+        results = mpr.insertion_electrodes.search(
             fields=[
-                "material_id", "formation_energy_per_atom", "band_gap",
-                "formula_pretty", "energy_above_hull", "composition_reduced",
-                "symmetry", "structure", "nsites"
+                "battery_id", "battery_formula", "working_ion", "num_steps", "max_voltage_step",
+                "nelements", "chemsys", "formula_anonymous", "formula_charge", "formula_discharge",
+                "max_delta_volume", "average_voltage", "capacity_grav", "capacity_vol", "energy_grav",
+                "energy_vol", "fracA_charge", "fracA_discharge", "stability_charge", "stability_discharge",
+                "id_charge", "id_discharge", "host_structure"
             ]
         )
-    
+
     # Convert results to DataFrame
     data = []
     for result in results:
         entry = {
-            "material_id": result.material_id,
-            "formation_energy_per_atom": result.formation_energy_per_atom,
-            "band_gap": result.band_gap,
-            "pretty_formula": result.formula_pretty,
-            "e_above_hull": result.energy_above_hull,
-            "elements": result.composition_reduced,
-            "spacegroup.number": result.symmetry.number if result.symmetry else None,
-            "cif": result.structure.to(fmt="cif") if result.structure else None,
-            "nsites": result.nsites
+            "battery_id": result.battery_id,
+            "battery_formula": result.battery_formula,
+            "working_ion": result.working_ion,
+            "num_steps": result.num_steps,
+            "max_voltage_step": result.max_voltage_step,
+            "nelements": result.nelements,
+            "chemsys": result.chemsys,
+            "formula_anonymous": result.formula_anonymous,
+            "formula_charge": result.formula_charge,
+            "formula_discharge": result.formula_discharge,
+            "max_delta_volume": result.max_delta_volume,
+            "average_voltage": result.average_voltage,
+            "capacity_grav": result.capacity_grav,
+            "capacity_vol": result.capacity_vol,
+            "energy_grav": result.energy_grav,
+            "energy_vol": result.energy_vol,
+            "fracA_charge": result.fracA_charge,
+            "fracA_discharge": result.fracA_discharge,
+            "stability_charge": result.stability_charge,
+            "stability_discharge": result.stability_discharge,
+            "id_charge": result.id_charge,
+            "id_discharge": result.id_discharge,
+            "cif": result.host_structure.to(fmt="cif") if result.host_structure else None
         }
         data.append(entry)
-    
-    dataframe = pd.DataFrame(data)
-    dataframe = dataframe[dataframe["nsites"] <= max_sites].reset_index(drop=True)  # Apply max_sites filter manually
-    
-    if include_te:
-        te = pd.read_csv('data/thermoelectric_prop.csv', index_col=0).dropna()
-        ind = dataframe.index.intersection(te.index)
-        dataframe = pd.concat([dataframe, te.loc[ind, :]], axis=1)
-        dataframe['Seebeck'] = dataframe['Seebeck'].apply(np.abs)
-    
+
+    dataframe = pd.DataFrame(data).reset_index(drop=True)
     return dataframe
 
-
-def FTCP_represent(dataframe, max_elms=3, max_sites=20, return_Nsites=False):
-    '''
-    This function represents crystals in the dataframe to their FTCP representations.
-
+def FTCP_represent(dataframe, return_Nsites=False):
+    """
+    Converts battery materials into their FTCP representations.
     Parameters
     ----------
     dataframe : pandas dataframe
-        Dataframe containing cyrstals to be converted; 
+        Dataframe containing batteries to be converted; 
         CIFs need to be included under column 'cif'.
-    max_elms : int, optional
-        Maximum number of components/elements for crystals in the dataframe. 
-        The default is 3.
-    max_sites : int, optional
-        Maximum number of sites for crystals in the dataframe.
-        The default is 20.
     return_Nsites : bool, optional
         Whether to return number of sites to be used in the error calculation
         of reconstructed site coordinate matrix
@@ -93,14 +84,19 @@ def FTCP_represent(dataframe, max_elms=3, max_sites=20, return_Nsites=False):
     Returns
     -------
     FTCP : numpy ndarray
-        FTCP representation as numpy array for crystals in the dataframe.
+        FTCP representation as numpy array for batteries in the dataframe.
 
-    '''
-    
-    # Suppress warnings
+    """
     import warnings
     warnings.filterwarnings("ignore")
-    
+
+    max_elms = dataframe["cif"].apply(lambda x: len(set(Structure.from_str(x, fmt="cif").atomic_numbers))).max()
+    max_elms = max(4, max_elms)  # Ensure at least 4 elements
+
+    max_sites = dataframe["cif"].apply(lambda x: len(Structure.from_str(x, fmt="cif").sites)).max()
+
+    print(f"🔍 Adjusted max_elms to {max_elms}, max_sites to {max_sites} based on dataset.")
+
     # Read string of elements considered in the study
     elm_str = joblib.load('data/element.pkl')
     # Build one-hot vectors for the elements
