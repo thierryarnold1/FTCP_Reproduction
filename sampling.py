@@ -107,18 +107,23 @@ def get_info(ftcp_designs,
         pred_site_coor.append(pred_site_coor_[i, :Nsites, :])
     
     if check_uniqueness:
-        assert mp_api_key != None, "You need a mp_api_key to check the uniqueness of designed CIFs!"
-        # Obtain unique designed compositions
+        assert mp_api_key is not None, "You need an MP API key to check uniqueness!"
+
         mpr = MPRester(mp_api_key)
         ind = []
         op = tqdm(range(len(pred_formula)))
+
         for i in op:
-            op.set_description("Checking uniqueness of designed compostions in the Materials Project database")
-            query = mpr.get_data(''.join(pred_formula[i])) 
-            if not query:
-                ind.append(i)
+            op.set_description("Checking uniqueness of designed compositions...")
+            formula_str = "".join(pred_formula[i])  # Convert list to string formula
+            try:
+                query = mpr.materials.summary.search(formula=formula_str, fields=["material_id"])  # ✅ Updated API Call
+                if not query:  # If query is empty, the formula is unique
+                    ind.append(i)
+            except Exception as e:
+                print(f"Warning: API query failed for {formula_str}: {e}")
+    
     else:
-        # A dummy index
         ind = list(np.arange(len(pred_formula)))
     
     if to_CIF:
