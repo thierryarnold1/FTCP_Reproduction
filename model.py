@@ -153,7 +153,7 @@ def FTCP(X_train, y_train, coeffs=(2, 10,), semi=False, label_ind=None, prop_dim
     x_dec = BatchNormalization()(x_dec)
     x_dec = Activation('relu')(x_dec)
     x_dec = Conv2DTranspose(channel_dim, (filter_size[0], 1), strides=(strides[0], 1), padding='same')(x_dec)
-    x_dec = Activation('tanh')(x_dec)
+    x_dec = Activation('sigmoid')(x_dec)
     decoder_outputs = Lambda(lambda x: K.squeeze(x, axis=2))(x_dec)
     decoder = Model(latent_inputs, decoder_outputs, name='decoder')
     
