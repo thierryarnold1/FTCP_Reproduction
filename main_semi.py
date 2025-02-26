@@ -83,7 +83,7 @@ VAE.fit(
     X_train,
     shuffle=True, 
     batch_size=256,
-    epochs=30,  # ✅ Reduced for testing; increase later, initially 200
+    epochs=200,  
     callbacks=[reduce_lr, schedule_lr],
 )
 
@@ -179,13 +179,6 @@ for i in range(max_elms):
     elm_recon = np.argmax(X_test_recon_[:, :len(elm_str), i], axis=1)
     elm_accu.append(metrics.accuracy_score(elm, elm_recon))
 print(f'Accuracy for {len(elm_str)} elements are respectively: {elm_accu}')
-
-# Get target-learning branch regression error
-y_test_hat = regression.predict(X_test, verbose=1)
-y_test_hat_ = scaler_y.inverse_transform(y_test_hat[0])
-y_test_semi_hat_ = scaler_y_semi.inverse_transform(y_test_hat[1])
-print(f'The regression MAE for {prop[:prop_dim]} are respectively', MAE(y_test_[:, :prop_dim], y_test_hat_))
-print(f'The regression MAE for {prop[prop_dim:prop_dim+semi_prop_dim]} are respectively', MAE(y_test_[:, prop_dim:prop_dim+semi_prop_dim], y_test_semi_hat_))
 
 #%% Sampling the latent space and perform inverse design
 
