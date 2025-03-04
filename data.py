@@ -39,6 +39,12 @@ def data_query(mp_api_key):
     # Convert results to DataFrame
     data = []
     for result in results:
+        try:
+            # ✅ Correctly retrieve the discharged structure
+            cif_structure = mpr.materials.get_structure_by_material_id(result.id_discharge).to(fmt="cif") if result.id_discharge else None
+        except:
+            cif_structure = None  # Handle missing structures gracefully
+
         entry = {
             "battery_id": result.battery_id,
             "battery_formula": result.battery_formula,
@@ -62,12 +68,14 @@ def data_query(mp_api_key):
             "stability_discharge": result.stability_discharge,
             "id_charge": result.id_charge,
             "id_discharge": result.id_discharge,
-            "cif": result.id_discharge.get_structure().to(fmt="cif") if result.id_discharge else None
+            #  Now uses the **discharged** structure (Li-inserted)
+            "cif": cif_structure
         }
         data.append(entry)
 
     dataframe = pd.DataFrame(data).reset_index(drop=True)
     return dataframe
+
 
 def FTCP_represent(dataframe, return_Nsites=False):
     """
