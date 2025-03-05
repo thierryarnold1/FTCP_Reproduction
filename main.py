@@ -20,13 +20,13 @@ mp_api_key = os.getenv("MP_API_KEY")
 
 
 # ✅ Check if `FTCP_data_batteries.npy` already exists
-if os.path.exists("dataframes/FTCP_data_batteries.npy") and os.path.exists("dataframes/Nsites_batteries.npy"):
-    print("✅ Found `FTCP_data_batteries.npy`, skipping data retrieval and FTCP representation.")
+if os.path.exists("dataframes/FTCP_data_batteries.npy") and os.path.exists("dataframes/Nsites_batteries.npy") and os.path.exists("dataframes/batteries_data_lithium.csv"):
+    print("✅ Found `FTCP_data_batteries.npy` and dataframe, skipping data retrieval and FTCP representation.")
     FTCP_representation = np.load("dataframes/FTCP_data_batteries.npy")
     df_lithium = pd.read_csv("dataframes/batteries_data_lithium.csv")
     Nsites = np.load("dataframes/Nsites_batteries.npy")
 else:
-    print("🔍 `FTCP_data_batteries.npy` not found, retrieving battery data from Materials Project API...")
+    print("🔍 `FTCP_data_batteries.npy` or dataframe not found, retrieving battery data from Materials Project API...")
     
     # ✅ Query battery materials
     dataframe = data_query(mp_api_key)
