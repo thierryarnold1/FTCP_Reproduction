@@ -20,11 +20,11 @@ mp_api_key = os.getenv("MP_API_KEY")
 
 
 # ✅ Check if `FTCP_data_batteries.npy` already exists
-if os.path.exists("FTCP_data_batteries.npy") and os.path.exists("Nsites_batteries.npy"):
+if os.path.exists("dataframes/FTCP_data_batteries.npy") and os.path.exists("dataframes/Nsites_batteries.npy"):
     print("✅ Found `FTCP_data_batteries.npy`, skipping data retrieval and FTCP representation.")
-    FTCP_representation = np.load("FTCP_data_batteries.npy")
-    dataframe = pd.read_csv("batteries_data.csv")
-    Nsites = np.load("Nsites_batteries.npy")
+    FTCP_representation = np.load("dataframes/FTCP_data_batteries.npy")
+    df_lithium = pd.read_csv("dataframes/batteries_data_lithium.csv")
+    Nsites = np.load("dataframes/Nsites_batteries.npy")
 else:
     print("🔍 `FTCP_data_batteries.npy` not found, retrieving battery data from Materials Project API...")
     
@@ -34,8 +34,14 @@ else:
     # ✅ Save dataset for future use
     dataframe.to_csv("batteries_data.csv", index=False)
 
+    # Filter entries where `formula_discharge` contains Lithium (Li)
+    df_lithium = dataframe[dataframe["formula_discharge"].str.contains("Li", na=False)]
+
+    # Save the filtered dataframe
+    df_lithium.to_csv("dataframes/batteries_data_lithium.csv", index=False)
+
     # ✅ Obtain FTCP representation
-    FTCP_representation, Nsites = FTCP_represent(dataframe, return_Nsites=True)
+    FTCP_representation, Nsites = FTCP_represent(df_lithium, return_Nsites=True)
 
     # ✅ Save FTCP representation
     np.save("FTCP_data_batteries.npy", FTCP_representation)
@@ -46,6 +52,7 @@ FTCP_representation = pad(FTCP_representation, 2)
 X, scaler_X = minmax(FTCP_representation)
 
 # Get Y from filtered dataframe
+dataframe = df_lithium
 prop = ['average_voltage', 'capacity_grav', 'capacity_vol', 'energy_grav', 'energy_vol']
 Y = dataframe[prop].values  # ✅ Now X and Y match perfectly
 scaler_y = MinMaxScaler()
