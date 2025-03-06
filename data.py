@@ -3,6 +3,7 @@ import joblib
 import json
 import numpy as np
 import pandas as pd
+import concurrent.futures
 from functools import partial
 from tqdm import tqdm
 from sklearn.preprocessing import OneHotEncoder
@@ -11,22 +12,53 @@ from mp_api.client import MPRester  # New API Client
 
 tqdm = partial(tqdm, position=0, leave=True)
 
-def data_query(mp_api_key):
+
+def fetch_cif_by_id(id_discharge, mp_api_key):
     """
-    Queries batteries data from the Materials Project using the new API v3.
+    Fetch the discharged structure CIF content for a given material ID.
+
+    Parameters
+    ----------
+    id_discharge : str
+        The material ID for the discharged structure.
+    mp_api_key : str
+        The Materials Project API key.
+
+    Returns
+    -------
+    str or None
+        The raw CIF text if successful, otherwise None.
+    """
+    if not id_discharge:
+        return None
+    try:
+        with MPRester(mp_api_key) as local_mpr:
+            structure = local_mpr.materials.get_structure_by_material_id(id_discharge)
+            return structure.to(fmt="cif")
+    except Exception:
+        return None
+
+def data_query(mp_api_key, max_workers=10):
+    """
+    Queries battery data from the Materials Project using API v3 and downloads
+    the discharged structure CIF files concurrently.
 
     Parameters
     ----------
     mp_api_key : str
         The API key for Materials Project.
-        
+    max_workers : int, optional
+        Maximum number of processes to use concurrently (default is 10).
+
     Returns
     -------
     dataframe : pandas.DataFrame
-        DataFrame with the queried Batteries materials and their properties.
+        DataFrame with the queried battery materials and their properties,
+        including a column "cif" containing the raw CIF content for the discharged structure.
     """
+    # Retrieve the battery data using the recommended API endpoint.
     with MPRester(mp_api_key) as mpr:
-        results = mpr.insertion_electrodes.search(
+        results = mpr.materials.insertion_electrodes.search(
             fields=[
                 "battery_id", "battery_formula", "working_ion", "num_steps", "max_voltage_step",
                 "nelements", "chemsys", "formula_anonymous", "formula_charge", "formula_discharge",
@@ -36,15 +68,17 @@ def data_query(mp_api_key):
             ]
         )
 
-    # Convert results to DataFrame
-    data = []
-    for result in results:
-        try:
-            # ✅ Correctly retrieve the discharged structure
-            cif_structure = mpr.materials.get_structure_by_material_id(result.id_discharge).to(fmt="cif") if result.id_discharge else None
-        except:
-            cif_structure = None  # Handle missing structures gracefully
+    # Extract only the id_discharge values (simple strings) for parallel processing.
+    ids = [result.id_discharge for result in results]
 
+    # Use ProcessPoolExecutor to fetch CIF content concurrently.
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        func = partial(fetch_cif_by_id, mp_api_key=mp_api_key)
+        cif_results = list(executor.map(func, ids))
+
+    # Build the data entries with the fetched CIF content.
+    data = []
+    for result, cif_structure in zip(results, cif_results):
         entry = {
             "battery_id": result.battery_id,
             "battery_formula": result.battery_formula,
@@ -68,14 +102,12 @@ def data_query(mp_api_key):
             "stability_discharge": result.stability_discharge,
             "id_charge": result.id_charge,
             "id_discharge": result.id_discharge,
-            #  Now uses the **discharged** structure (Li-inserted)
-            "cif": cif_structure
+            "cif": cif_structure  # The raw discharged structure CIF content.
         }
         data.append(entry)
 
     dataframe = pd.DataFrame(data).reset_index(drop=True)
     return dataframe
-
 
 def FTCP_represent(dataframe, return_Nsites=False):
     """
