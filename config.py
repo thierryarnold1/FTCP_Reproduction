@@ -1,40 +1,37 @@
 # config.py
 
 FTCP_CONFIG = {
-    # --- Architecture ---
-    "latent_dim": 256,                  # Latent space dimension
-    "filters": [32, 64, 128],           # Conv1D/Conv2DTranspose filters
-    "filter_sizes": [5, 3, 3],          # Kernel sizes
-    "strides": [2, 2, 1],               # Strides for conv layers
-    "optimizer": "RMSprop", 
+    # === Encoder/Decoder Architecture ===
+    "latent_dim": 256,                  # Dimensionality of latent space
+    "filters": [32, 64, 128],           # Number of filters in each Conv1D layer
+    "filter_sizes": [5, 3, 3],          # Kernel sizes for each Conv1D/Conv2DTranspose
+    "strides": [2, 2, 1],               # Strides for each convolutional layer
 
-    # --- Activations ---
-    "activation_dense": "relu",         # Dense layers
-    "activation_latent": "sigmoid",     # Latent bottleneck layer
-    "activation_conv": "relu",          # Decoder conv layers
-    "activation_final_decoder": "sigmoid",  # Last decoder activation
-    "regression_output_activation": "sigmoid",  # Regression output layer
+    # === Activation & Normalization ===
+    "leakyrelu_alpha": 0.2,             # Negative slope coefficient for LeakyReLU
+    "activation_dense": "relu",         # Activation for dense layers (regression + decoder)
+    "activation_latent": "sigmoid",     # Activation before latent representation
+    "activation_conv": "relu",          # Activation in decoder Conv2DTranspose layers
+    "activation_final_decoder": "sigmoid",  # Activation after final decoder layer
+    "regression_output_activation": "sigmoid",  # Activation for regression output layer
+    "use_batchnorm": True,              # Whether to apply BatchNormalization
+    "use_dropout": False,               # Whether to use dropout in regression branch
+    "dropout_rate": 0.3,                # Dropout rate if enabled
 
-    # --- Regularization ---
-    "use_batchnorm": True,              # Apply BatchNormalization
-    "leakyrelu_alpha": 0.2,             # LeakyReLU slope (encoder)
-    "use_dropout": False,               # Enable dropout (optional)
-    "dropout_rate": 0.3,                # Dropout rate
+    # === Latent Bottleneck ===
+    "dense_latent_dim": 1024,           # Size of dense layer before latent mean/log_var
 
-    # --- Regression ---
-    "regression_hidden": [128, 32],     # Hidden layers for property prediction
+    # === Regression MLP (for property prediction) ===
+    "regression_hidden": [128, 32],     # List of hidden units in regression head
 
-    # --- Loss weights ---
-    "coeff_KL": 2,                      # KL divergence weight
-    "coeff_prop": 10,                   # Property loss weight
+    # === Loss Coefficients ===
+    "coeff_KL": 2,                      # KL divergence loss weight
+    "coeff_prop": 10,                   # Property prediction loss weight
     "coeff_prop_semi": 5,               # Semi-supervised property loss weight
 
-    # --- Training ---
-    "learning_rate": 5e-4,
-    "batch_size": 64,
-    "epochs": 200,
-
-    # --- Sampling / Inverse Design ---
-    "Lp_scale": 0.6,                    # Latent perturbation scale
-    "Nperturb": 3                       # Number of perturbations per sample
+    # === Optimizer and Training ===
+    "optimizer": "RMSprop",             # Optimizer class name (e.g., 'Adam', 'SGD')
+    "learning_rate": 5e-4,              # Learning rate
+    "batch_size": 64,                   # Training batch size
+    "epochs": 200                       # Number of training epochs
 }
