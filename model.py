@@ -79,8 +79,8 @@ def FTCP(X_train, y_train, coeffs=(2, 10,), semi=False, label_ind=None, prop_dim
     x = LeakyReLU(0.2)(x)
     x = Flatten()(x)
     x = Dense(1024, activation='sigmoid')(x)
-    z_mean = Dense(latent_dim,activation = 'linear')(x)
-    z_log_var = Dense(latent_dim,activation = 'linear')(x)
+    z_mean = Dense(latent_dim,activation = 'linear', name='z_mean')(x)
+    z_log_var = Dense(latent_dim,activation = 'linear', name='z_log_var')(x)
 
     def sampling(args):
         z_mean, z_log_var = args
