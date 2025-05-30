@@ -95,7 +95,7 @@ def FTCP(X_train, y_train, coeffs=(2, 10,), semi=False, label_ind=None, prop_dim
         x = Dense(128, activation="relu")(x)
         x = Dense(32, activation="relu")(x)
         y_hat = Dense(regression_dim, activation ='sigmoid')(x)
-        regression = Model(encoder_inputs, y_hat, name='target-learning branch')
+        regression = Model(encoder_inputs, y_hat, name='target_learning_branch')
     else:
         x = Activation('relu')(z_mean)
         x = Dense(128, activation="relu")(x)
@@ -106,7 +106,7 @@ def FTCP(X_train, y_train, coeffs=(2, 10,), semi=False, label_ind=None, prop_dim
         x = Dense(128, activation="relu")(x)
         x = Dense(32, activation="relu")(x)
         y_semi_hat = Dense(semi_prop_dim, activation ='sigmoid')(x)
-        regression = Model(encoder_inputs, [y_hat, y_semi_hat], name='target-learning branch')
+        regression = Model(encoder_inputs, [y_hat, y_semi_hat], name='target_learning_branch')
 
         y_semi = Lambda(lambda x: tf.gather(x, semi_ind, axis=0))(regression_inputs)
         y_semi_hat = Lambda(lambda x: tf.gather(x, semi_ind, axis=0))(y_semi_hat)
