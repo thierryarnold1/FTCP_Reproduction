@@ -28,24 +28,17 @@ if os.path.exists("dataframes/FTCP_data_batteries.npy") and os.path.exists("data
 else:
     print("🔍 `FTCP_data_batteries.npy` or dataframe not found, retrieving battery data from Materials Project API...")
     
-    # ✅ Query battery materials
-    dataframe = data_query(mp_api_key)
-
-    # ✅ Save dataset for future use
-    dataframe.to_csv("batteries_data.csv", index=False)
-
-    # Filter entries where `formula_discharge` contains Lithium (Li)
-    df_lithium = dataframe[dataframe["formula_discharge"].str.contains("Li", na=False)]
-
-    # Save the filtered dataframe
-    df_lithium.to_csv("dataframes/batteries_data_lithium.csv", index=False)
+    # Load the dataframe
+    df_lithium = pd.read_csv("dataframes/batteries_data_lithium.csv")
 
     # ✅ Obtain FTCP representation
-    FTCP_representation, Nsites = FTCP_represent(df_lithium, return_Nsites=True)
+    FTCP_representation, Nsites, max_elms, max_sites = FTCP_represent(df_lithium, return_Nsites=True)
 
     # ✅ Save FTCP representation
     np.save("FTCP_data_batteries.npy", FTCP_representation)
     np.save("Nsites_batteries.npy", Nsites)
+
+    print("FTCP Shape:", FTCP_representation.shape)
 
 # Preprocess FTCP representation to obtain input X
 FTCP_representation = pad(FTCP_representation, 2)
@@ -53,7 +46,7 @@ X, scaler_X = minmax(FTCP_representation)
 
 # Get Y from filtered dataframe
 dataframe = df_lithium
-prop = ['average_voltage', 'capacity_grav', 'capacity_vol', 'energy_grav', 'energy_vol']
+prop = ['fracA_discharge']
 Y = dataframe[prop].values  # ✅ Now X and Y match perfectly
 scaler_y = MinMaxScaler()
 Y = scaler_y.fit_transform(Y)
@@ -68,7 +61,7 @@ np.save("X_train_batteries.npy", X_train)
 np.save("y_train_batteries.npy", y_train)
 
 # ✅ Get model
-VAE, encoder, decoder, regression, vae_loss = FTCP(X_train, y_train, coeffs=(2, 10,))
+VAE, encoder, decoder, regression = FTCP(X_train, y_train, coeffs=(2, 10,))
 
 # ✅ Learning rate scheduling
 reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.3, patience=4, min_lr=1e-6)
@@ -82,8 +75,64 @@ def scheduler(epoch, lr):
 
 schedule_lr = LearningRateScheduler(scheduler)
 
+class TrackIndividualLosses(tf.keras.callbacks.Callback):
+    def __init__(self, X_train, y_train, encoder, decoder, regression):
+        super().__init__()
+        self.X_train = X_train
+        self.y_train = y_train
+        self.encoder = encoder
+        self.decoder = decoder
+        self.regression = regression
+        self.loss_history = {
+            'epoch': [],
+            'reconstruction_loss': [],
+            'kl_loss': [],
+            'property_loss': [],
+            'total_loss': [],
+        }
+
+    def on_epoch_end(self, epoch, logs=None):
+        idx = np.random.choice(len(self.X_train), size=256, replace=False)
+        X_batch = self.X_train[idx]
+        y_batch = self.y_train[idx]
+
+        encoder_inputs, regression_inputs = X_batch, y_batch
+        pred = self.model([encoder_inputs, regression_inputs], training=False)
+
+        # Forward pass
+        z_mean = self.encoder.get_layer('z_mean').output
+        z_log_var = self.encoder.get_layer('z_log_var').output
+
+        z_mean_model = tf.keras.Model(self.encoder.input, z_mean)
+        z_log_var_model = tf.keras.Model(self.encoder.input, z_log_var)
+
+        z_mean_val = z_mean_model.predict(encoder_inputs)
+        z_log_var_val = z_log_var_model.predict(encoder_inputs)
+
+        recon_loss = np.sum((encoder_inputs - pred.numpy()) ** 2)
+        kl_loss = -0.5 * np.mean(1 + z_log_var_val - np.square(z_mean_val) - np.exp(z_log_var_val))
+        y_hat_val = self.regression.predict(encoder_inputs)
+        prop_loss = np.sum((regression_inputs[:, :y_hat_val.shape[1]] - y_hat_val) ** 2)
+
+        total_loss = np.mean(recon_loss + 2 * kl_loss + 10 * prop_loss)
+
+        self.loss_history['epoch'].append(epoch + 1)
+        self.loss_history['reconstruction_loss'].append(recon_loss)
+        self.loss_history['kl_loss'].append(kl_loss)
+        self.loss_history['property_loss'].append(prop_loss)
+        self.loss_history['total_loss'].append(total_loss)
+
+    def on_train_end(self, logs=None):
+        df = pd.DataFrame(self.loss_history)
+        df.to_csv('individual_losses.csv', index=False)
+        print("✅ Saved individual loss breakdown to 'individual_losses.csv'")
+
+
+# Initialize your callback
+loss_tracker = TrackIndividualLosses(X_train, y_train, encoder=encoder, decoder=decoder, regression=regression)
+
 # ✅ Compile and Train Model
-VAE.compile(optimizer=optimizers.RMSprop(learning_rate=5e-4), loss=vae_loss)
+VAE.compile(optimizer=optimizers.RMSprop(learning_rate=5e-4))
 
 VAE.fit(
     [X_train, y_train],
@@ -91,41 +140,41 @@ VAE.fit(
     shuffle=True,
     batch_size=256,
     epochs=200,
-    callbacks=[reduce_lr, schedule_lr],
+    callbacks=[reduce_lr, schedule_lr, loss_tracker],
 )
 
 # ✅ Save trained model
-VAE.save("FTCP_VAE_batteries.h5")
-encoder.save("FTCP_encoder_batteries.h5")
-decoder.save("FTCP_decoder_batteries.h5")
-regression.save("FTCP_regression_batteries.h5")
+VAE.save("FTCP_VAE_batteries.keras")
+encoder.save("FTCP_encoder_batteries.keras")
+decoder.save("FTCP_decoder_batteries.keras")
+regression.save("FTCP_regression_batteries.keras")
 
 print("✅ Model training for batteries completed! Files saved successfully.")
 
-max_sites = 160
-max_elms = 6
-
 #%% Visualize latent space with two arbitrary dimensions
+# Predict latent space representations
 train_latent = encoder.predict(X_train, verbose=1)
 y_train_, y_test_ = scaler_y.inverse_transform(y_train), scaler_y.inverse_transform(y_test)
 
+# Plot settings
 font_size = 26
 plt.rcParams['axes.labelsize'] = font_size
-plt.rcParams['xtick.labelsize'] = font_size-2
-plt.rcParams['ytick.labelsize'] = font_size-2
+plt.rcParams['xtick.labelsize'] = font_size - 2
+plt.rcParams['ytick.labelsize'] = font_size - 2
 
-fig, ax = plt.subplots(1, 2, figsize=(18, 7.3))
-s0 = ax[0].scatter(train_latent[:,0], train_latent[:,1], s=7, c=np.squeeze(y_train_[:,0]))
-cbar = plt.colorbar(s0, ax=ax[0], ticks=list(range(-1, -8, -2)))
-s1 = ax[1].scatter(train_latent[:,0], train_latent[:,1], s=7, c=np.squeeze(y_train_[:,1]))
-plt.colorbar(s1, ax=ax[1], ticks=list(range(0, 10, 2)))
-fig.text(0.016, 0.92, '(A) Voltage', fontsize=font_size)
-fig.text(0.533, 0.92, '(B) Energy', fontsize=font_size)
+# Create figure with one subplot
+fig, ax = plt.subplots(1, 1, figsize=(9, 7.3))
+
+# Scatter plot for fracA_discharge
+s0 = ax.scatter(train_latent[:, 0], train_latent[:, 1], s=7, c=np.squeeze(y_train_[:, 0]), cmap="viridis")
+plt.colorbar(s0, ax=ax, label="fracA_discharge")
+fig.text(0.016, 0.92, '(A) fracA_discharge', fontsize=font_size)
 
 plt.tight_layout()
-plt.subplots_adjust(wspace=0.3, top=0.85)
-plt.savefig("latent_space_visualization.png")
+plt.subplots_adjust(top=0.88)
+plt.savefig("latent_space.png")
 plt.show()
+
 
 #%% Evalute Reconstruction, and Target-Learning Branch Error
 X_test_recon = VAE.predict([X_test, y_test], verbose=1)
@@ -180,34 +229,40 @@ for i in range(max_elms):
     elm_accu.append(metrics.accuracy_score(elm, elm_recon))
 print(f'Accuracy for {len(elm_str)} elements are respectively: {elm_accu}')
 
+# Get target-learning branch regression error
+y_test_hat = regression.predict(X_test, verbose=1)
+y_test_hat_ = scaler_y.inverse_transform(y_test_hat)
+print(f'The regression MAE for {prop} are respectively', MAE(y_test_, y_test_hat_))
+
 #%% Sampling the latent space and perform inverse design
 
 # Specify design targets, e.g., high voltage and energy density
-target_voltage, target_energy = 3.7, 600  # Example values for lithium-ion batteries
-Nsamples = 10
+# 1) Pick Nsamples seeds closest to your target property
+target_frac = 0.8
+Nsamples    = 10
+distances   = np.abs(y_train_.flatten() - target_frac)
+ind_seed    = np.argsort(distances)[:Nsamples]
+seeds       = train_latent[ind_seed]  # shape (Nsamples, latent_dim)
 
-# Obtain points closest to the design target in the training set
-ind_constraint = np.squeeze(np.argwhere(y_train_[:, 0] > target_voltage))
-ind_temp = np.argsort(np.abs(y_train_[ind_constraint, 1] - target_energy))
-ind_sample = ind_constraint[ind_temp][:Nsamples]
+# 2) Define local perturbation parameters
+Nperturb = 3      # how many perturbed copies per seed
+Lp_scale = 0.6    # Gaussian noise σ in latent space
 
-# Set number of perturbing instances around each compound
-Nperturb = 3
-Lp_scale = 0.6
+# 3) Tile seeds and add noise
+samples_lp = np.repeat(seeds, Nperturb, axis=0)           # shape (Nsamples*Nperturb, latent_dim)
+noise      = np.random.normal(0, Lp_scale, samples_lp.shape)
+samples_lp += noise
 
-# Sample (Lp)
-samples = train_latent[ind_sample, :]
-samples = np.tile(samples, (Nperturb, 1))
-gaussian_noise = np.random.normal(0, 1, samples.shape)
-samples = samples + gaussian_noise * Lp_scale
-ftcp_designs = decoder.predict(samples, verbose=1)
-ftcp_designs = inv_minmax(ftcp_designs, scaler_X)
+# 4) Decode & inverse‑scale back to FTCP representation
+ftcp_lp = decoder.predict(samples_lp, verbose=1)
+ftcp_lp = inv_minmax(ftcp_lp, scaler_X)
 
-# Get chemical info for designed battery materials and output CIFs
-pred_formula, pred_abc, pred_ang, pred_latt, pred_site_coor, ind_unique = get_info(ftcp_designs,
-                                                                                   max_elms,
-                                                                                   max_sites,
-                                                                                   elm_str=joblib.load('data/element.pkl'),
-                                                                                   to_CIF=True,
-                                                                                   check_uniqueness=True,
-                                                                                   mp_api_key=mp_api_key)
+# 5) Convert FTCP → chemistry & write CIFs
+elm_str = joblib.load('data/element.pkl')
+pred_formulas_lp, pred_abc_lp, pred_ang_lp, pred_latt_lp, pred_site_coor_lp, ind_unique_lp = get_info(
+    ftcp_lp,
+    max_elms, max_sites,
+    elm_str=elm_str,
+    to_CIF=True,
+    check_uniqueness=True,
+    mp_api_key=mp_api_key
