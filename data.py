@@ -99,7 +99,6 @@ def FTCP_represent(dataframe, return_Nsites=False):
     warnings.filterwarnings("ignore")
 
     max_elms = dataframe["cif"].apply(lambda x: len(set(Structure.from_str(x, fmt="cif").atomic_numbers))).max()
-    max_elms = max(4, max_elms)  # Ensure at least 4 elements
 
     max_sites = dataframe["cif"].apply(lambda x: len(Structure.from_str(x, fmt="cif").sites)).max()
 
@@ -206,6 +205,6 @@ def FTCP_represent(dataframe, return_Nsites=False):
     FTCP = np.stack(FTCP)
     
     if not return_Nsites:
-        return FTCP
+        return FTCP, max_elms, max_sites
     else:
-        return FTCP, np.array(Nsites)
+        return FTCP, np.array(Nsites), max_elms, max_sites 
